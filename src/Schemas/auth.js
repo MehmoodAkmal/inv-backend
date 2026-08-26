@@ -19,8 +19,12 @@ const userSchema = new mongoose.Schema({
     },
     role: {
         type: String,
-        enum: ["superAdmin", "admin", "manager"],
+        enum: ["superAdmin", "admin", "manager", "cashier"],
         default: "admin",
+    },
+    isActive: {
+        type: Boolean,
+        default: true, // soft-delete flag for staff accounts
     },
     organizationId: {
         type: mongoose.Schema.Types.ObjectId,

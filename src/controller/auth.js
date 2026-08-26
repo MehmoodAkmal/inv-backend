@@ -30,6 +30,13 @@ export const login = async (req, res) => {
                 message: "Invalid Email or Password"
             })
         }
+
+        if (!user.isActive) {
+            return res.status(403).json({
+                success: false,
+                message: "Your account has been deactivated. Please contact your administrator."
+            });
+        }
         const token = accessToken(
             {
                 id: user._id,
