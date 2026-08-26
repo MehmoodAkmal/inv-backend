@@ -7,7 +7,7 @@ const dbConnection = async () => {
          console.log("Database Connected")
          const user = await User.findOne({role: "superAdmin"});
          if (!user) {
-            createSuperAdmin()
+            await createSuperAdmin()
          }
     }catch(error){
         console.log(error.message);

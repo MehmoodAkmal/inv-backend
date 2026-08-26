@@ -2,6 +2,8 @@ import bcrypt from "bcrypt"
 import User from "../Schemas/auth.js";
 import { loginSchema, signupSchema } from "../validation/auth.js"
 import accessToken from "../utils/accesstoken.js";
+import Organization from "../Schemas/organiztion.js";
+import mongoose from "mongoose";
 
 export const login = async (req, res) => {
     try {
@@ -63,43 +65,35 @@ export const login = async (req, res) => {
 }
 
 export const signUp = async (req, res) => {
-    const session = await mongoose.startSession();
-    session.startTransaction();
     try {
         const { error, value } = signupSchema.validate(req.body);
         if (error) {
-            await session.abortTransaction();
             return res.status(400).json({ success: false, message: error.message });
         }
 
         const { firstName, lastName, email, password, organizationName } = value;
 
-        const existingUser = await User.findOne({ email }).session(session);
+        const existingUser = await User.findOne({ email });
         if (existingUser) {
-            await session.abortTransaction();
             return res.status(409).json({ success: false, message: "Email already exists" });
         }
 
         // Step 1: create the Organization
-        const [newOrg] = await Organization.create(
-            [{ name: organizationName }],
-            { session }
+        const newOrg = await Organization.create(
+            { name: organizationName },
         );
 
         // Step 2: create the owner user, tied to that org
-        const [newUser] = await User.create(
-            [{
+        const newUser = await User.create(
+            {
                 firstName,
                 lastName,
                 email,
                 password, // plain — pre-save hook hashes it
                 role: "admin", // hardcoded, never from req.body
                 organizationId: newOrg._id,
-            }],
-            { session }
+            }
         );
-
-        await session.commitTransaction();
 
         const token = accessToken(
             {
@@ -127,10 +121,8 @@ export const signUp = async (req, res) => {
         });
 
     } catch (error) {
-        await session.abortTransaction();
         console.error("Signup error:", error);
         return res.status(500).json({ success: false, message: "Server error" });
     } finally {
-        session.endSession();
     }
 };

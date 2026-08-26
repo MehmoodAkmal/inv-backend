@@ -14,14 +14,19 @@ export const authentication = async (req , res , next) => {
         : null;
 
         if(!token){
-            return rws.status(400).json({
+            return res.status(400).json({
                 success:false,
                 message: "Invalid authentiction token"
             })
         }
 
         const decode = jwt.verify(token , process.env.ACCESS_SECRET);
-        req.user = decode;
+        req.user = {
+            id: decode.id,
+            role: decode.role,
+            organizationId: decode.organizationId,
+            branchId: decode.branchId
+        };
         next();
     }catch(error){
         return res.status(400).json({
