@@ -5,8 +5,6 @@ import StockMovement from "../Schemas/stockMovement.js";
 import Item from "../Schemas/item.js";
 import Branch from "../Schemas/branch.js";
 
-// ── Joi schemas ────────────────────────────────────────────────────────────
-
 const objectId = () => joi.string().hex().length(24);
 
 const addStockSchema = joi.object({
@@ -23,85 +21,58 @@ const movementQuerySchema = joi.object({
     page:     joi.number().integer().min(1).default(1),
 });
 
-// ── Helper ─────────────────────────────────────────────────────────────────
-
 const fail = (res, status, message) =>
     res.status(status).json({ success: false, message });
 
 // ── 1. addStock (purchase entry) ───────────────────────────────────────────
 // POST /stock/add — admin, manager
 export const addStock = async (req, res) => {
-    // Validate body
-    const { error, value } = addStockSchema.validate(req.body);
-    if (error) return fail(res, 400, error.message);
-
-    const { itemId, branchId, quantity, note } = value;
-    const { organizationId, role, id: userId } = req.user;
-
-    // Managers are locked to their own branch — reject any mismatch
-    if (role === "manager") {
-        const allowed = req.allowedBranchId?.toString();
-        if (!allowed || allowed !== branchId) {
-            return fail(res, 403, "You can only add stock to your assigned branch");
-        }
-    }
-
-    // Verify item belongs to this org and is active
-    const item = await Item.findOne({ _id: itemId, organizationId, isActive: true });
-    if (!item) return fail(res, 400, "Invalid item");
-
-    // Verify branch belongs to this org and is active
-    const branch = await Branch.findOne({ _id: branchId, organizationId, isActive: true });
-    if (!branch) return fail(res, 400, "Invalid branch");
-
-    // ── Transaction ────────────────────────────────────────────────────────
-    // NOTE: MongoDB transactions require a replica set (or mongos).
-    // For a single-node local dev setup, either convert to a replica set
-    // (mongod --replSet rs0) or remove the session/transaction calls and
-    // accept the small window of inconsistency during development.
-    const session = await mongoose.startSession();
-
     try {
-        session.startTransaction();
+        const { error, value } = addStockSchema.validate(req.body);
+        if (error) return fail(res, 400, error.message);
 
-        // Find-or-create the stock document (upsert, initial quantity = 0)
-        let stock = await Stock.findOne(
-            { organizationId, branchId, itemId },
-            null,
-            { session }
-        );
+        const { itemId, branchId, quantity, note } = value;
+        const { organizationId, role, id: userId } = req.user;
 
+        if (role === "manager") {
+            const allowed = req.allowedBranchId?.toString();
+            if (!allowed || allowed !== branchId) {
+                return fail(res, 403, "You can only add stock to your assigned branch");
+            }
+        }
+
+        const item = await Item.findOne({ _id: itemId, organizationId, isActive: true });
+        if (!item) return fail(res, 400, "Invalid item");
+
+        const branch = await Branch.findOne({ _id: branchId, organizationId, isActive: true });
+        if (!branch) return fail(res, 400, "Invalid branch");
+
+        // Find-or-create stock document
+        let stock = await Stock.findOne({ organizationId, branchId, itemId });
         if (!stock) {
-            // Create via Model constructor + save so the session is respected
-            const newStock = new Stock({ organizationId, branchId, itemId, quantity: 0 });
-            stock = await newStock.save({ session });
+            stock = await Stock.create({ organizationId, branchId, itemId, quantity: 0 });
         }
 
         const previousQuantity = stock.quantity;
         const newQuantity      = previousQuantity + quantity;
 
-        // Update stock quantity in place
         stock.quantity = newQuantity;
-        await stock.save({ session });
+        await stock.save();
 
-        // Write the immutable movement record
-        const [movement] = await StockMovement.create(
-            [{
-                organizationId,
-                branchId,
-                itemId,
-                type:             "purchase",
-                quantity,
-                previousQuantity,
-                newQuantity,
-                refId:            null,
-                note:             note || null,
-                createdBy:        userId,
-            }],
-            { session }
-        );
-
-        await session.commitTransaction();
+        // Write immutable movement record via native driver (bypasses Mongoose
+        // update/delete immutability hooks — create is always allowed)
+        const [movement] = await StockMovement.create([{
+            organizationId,
+            branchId,
+            itemId,
+            type:             "purchase",
+            quantity,
+            previousQuantity,
+            newQuantity,
+            refId:            null,
+            note:             note || null,
+            createdBy:        userId,
+        }]);
 
         return res.status(201).json({
             success: true,
@@ -109,11 +80,8 @@ export const addStock = async (req, res) => {
             data: { stock, movement },
         });
     } catch (err) {
-        await session.abortTransaction();
         console.error("addStock error:", err);
         return fail(res, 500, "An unexpected error occurred");
-    } finally {
-        session.endSession();
     }
 };
 
@@ -123,22 +91,15 @@ export const getStockByBranch = async (req, res) => {
     try {
         const { organizationId, role } = req.user;
 
-        // Non-admin roles are always locked to their own branch
         let branchId;
         if (role === "admin") {
             branchId = req.query.branchId;
-            if (!branchId) {
-                return fail(res, 400, "branchId query parameter is required for admin");
-            }
-            // Verify the branch belongs to this admin's org
+            if (!branchId) return fail(res, 400, "branchId query parameter is required for admin");
             const branch = await Branch.findOne({ _id: branchId, organizationId, isActive: true });
             if (!branch) return fail(res, 400, "Invalid branch");
         } else {
-            // manager / cashier — ignore any client-supplied branchId
             branchId = req.allowedBranchId;
-            if (!branchId) {
-                return fail(res, 400, "No branch assigned to your account");
-            }
+            if (!branchId) return fail(res, 400, "No branch assigned to your account");
         }
 
         const stockDocs = await Stock.find({ organizationId, branchId })
@@ -146,8 +107,6 @@ export const getStockByBranch = async (req, res) => {
             .sort({ updatedAt: -1 })
             .lean();
 
-        // Attach computed isLowStock flag and filter out docs where item
-        // was soft-deleted (populate returns null for deleted items)
         const data = stockDocs
             .filter((s) => s.itemId)
             .map((s) => ({
@@ -172,26 +131,21 @@ export const getStockMovementHistory = async (req, res) => {
     try {
         const { organizationId, role } = req.user;
 
-        // Validate + coerce query params
         const { error, value } = movementQuerySchema.validate(req.query);
         if (error) return fail(res, 400, error.message);
 
         const { limit, page } = value;
         const skip = (page - 1) * limit;
-
         const filter = { organizationId };
 
-        // Branch scoping — managers are locked to their own branch
         if (role === "manager") {
             const locked = req.allowedBranchId;
             if (!locked) return fail(res, 400, "No branch assigned to your account");
             filter.branchId = locked;
         } else if (value.branchId) {
-            // Admin can optionally filter by any branch in their org
             filter.branchId = value.branchId;
         }
 
-        // Optional item filter
         if (value.itemId) filter.itemId = value.itemId;
 
         const [movements, total] = await Promise.all([
@@ -206,15 +160,10 @@ export const getStockMovementHistory = async (req, res) => {
         ]);
 
         return res.status(200).json({
-            success:  true,
-            message:  "Stock movement history fetched successfully",
-            data:     movements,
-            pagination: {
-                total,
-                page,
-                limit,
-                totalPages: Math.ceil(total / limit),
-            },
+            success: true,
+            message: "Stock movement history fetched successfully",
+            data:    movements,
+            pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
         });
     } catch (err) {
         console.error("getStockMovementHistory error:", err);

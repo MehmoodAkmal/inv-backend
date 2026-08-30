@@ -1,0 +1,36 @@
+import express from "express";
+import { createSale, getSales, getSaleById } from "../controller/saleController.js";
+import { authentication } from "../middleware/authentication.js";
+import { authorization } from "../middleware/authorization.js";
+import { branchScope } from "../middleware/branchScope.js";
+
+const saleRouter = express.Router();
+
+// POST /api/v1/sales — admin, manager, cashier
+saleRouter.post(
+    "/sales",
+    authentication,
+    authorization("admin", "manager", "cashier"),
+    branchScope,
+    createSale
+);
+
+// GET /api/v1/sales — admin, manager, cashier
+saleRouter.get(
+    "/sales",
+    authentication,
+    authorization("admin", "manager", "cashier"),
+    branchScope,
+    getSales
+);
+
+// GET /api/v1/sales/:id — admin, manager, cashier
+saleRouter.get(
+    "/sales/:id",
+    authentication,
+    authorization("admin", "manager", "cashier"),
+    branchScope,
+    getSaleById
+);
+
+export default saleRouter;
