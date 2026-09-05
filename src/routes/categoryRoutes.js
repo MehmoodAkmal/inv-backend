@@ -11,7 +11,7 @@ import { authorization } from "../middleware/authorization.js";
 const categoryRouter = express.Router();
 
 categoryRouter.post("/categories",     authentication, authorization("admin"),            createCategory);
-categoryRouter.get("/categories",      authentication, authorization("admin", "manager"), getCategories);
+categoryRouter.get("/categories",      authentication, authorization("admin", "manager", "cashier"), getCategories);
 categoryRouter.put("/categories/:id",  authentication, authorization("admin"),            updateCategory);
 categoryRouter.delete("/categories/:id", authentication, authorization("admin"),          deactivateCategory);
 
