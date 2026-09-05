@@ -12,6 +12,8 @@ import expenseRouter   from "../routes/expenseRoutes.js";
 import employeeRouter  from "../routes/employeeRoutes.js";
 import salaryRouter    from "../routes/salaryRoutes.js";
 import reportRouter    from "../routes/reportRoutes.js";
+import organizationRouter from "../routes/organizationRoutes.js";
+import superAdminRouter   from "../routes/superAdminRoutes.js";
 
 const prepareRoutes = (app) => {
     const prefix = "/api/v1"
@@ -28,6 +30,8 @@ const prepareRoutes = (app) => {
     app.use(`${prefix}`, employeeRouter)
     app.use(`${prefix}`, salaryRouter)
     app.use(`${prefix}`, reportRouter)
+    app.use(`${prefix}`, organizationRouter)
+    app.use(`${prefix}`, superAdminRouter)
 }
 
 export default prepareRoutes;

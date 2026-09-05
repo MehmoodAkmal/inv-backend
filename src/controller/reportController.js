@@ -414,8 +414,60 @@ export const getDashboardSummary = async (req, res) => {
             ]),
         ]);
 
-        const today  = todaySalesAgg[0]  ?? {};
-        const month  = monthSalesAgg[0]  ?? {};
+        // Yesterday's boundaries
+        const yesterdayDate = new Date(now);
+        yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+        const yStr          = yesterdayDate.toISOString().slice(0, 10);
+        const yesterdayStart = dayStart(yStr);
+        const yesterdayEnd   = dayEnd(yStr);
+
+        // 7-day daily trend (today + 6 prior days)
+        const [yesterdaySalesAgg, sevenDayAgg] = await Promise.all([
+            Sale.aggregate([
+                { $match: { ...baseMatch, createdAt: { $gte: yesterdayStart, $lte: yesterdayEnd } } },
+                { $group: {
+                    _id:          null,
+                    count:        { $sum: 1 },
+                    totalAmount:  { $sum: "$totalAmount" },
+                    cashAmount:   { $sum: { $cond: [{ $eq: ["$paymentType", "cash"] }, "$totalAmount", 0] } },
+                    creditAmount: { $sum: { $cond: [{ $eq: ["$paymentType", "credit"] }, "$totalAmount", 0] } },
+                }},
+            ]),
+            Sale.aggregate([
+                { $match: { ...baseMatch, createdAt: { $gte: dayStart(new Date(new Date().setDate(new Date().getDate() - 6)).toISOString().slice(0,10)), $lte: todayEnd } } },
+                { $group: {
+                    _id: {
+                        $dateToString: { format: "%Y-%m-%d", date: "$createdAt", timezone: "UTC" }
+                    },
+                    total:  { $sum: "$totalAmount" },
+                    cash:   { $sum: { $cond: [{ $eq: ["$paymentType", "cash"] }, "$totalAmount", 0] } },
+                    credit: { $sum: { $cond: [{ $eq: ["$paymentType", "credit"] }, "$totalAmount", 0] } },
+                    count:  { $sum: 1 },
+                }},
+                { $sort: { "_id": 1 } },
+            ]),
+        ]);
+
+        // Fill all 7 days (including days with zero sales)
+        const trendMap = Object.fromEntries(sevenDayAgg.map((d) => [d._id, d]));
+        const trend = Array.from({ length: 7 }, (_, i) => {
+            const d   = new Date(now);
+            d.setDate(d.getDate() - (6 - i));
+            const key = d.toISOString().slice(0, 10);
+            const day = trendMap[key] ?? {};
+            return {
+                date:   key,
+                label:  d.toLocaleDateString("en-US", { weekday: "short" }),
+                total:  r2(day.total  ?? 0),
+                cash:   r2(day.cash   ?? 0),
+                credit: r2(day.credit ?? 0),
+                count:  day.count ?? 0,
+            };
+        });
+
+        const today     = todaySalesAgg[0]  ?? {};
+        const yesterdayData = yesterdaySalesAgg[0] ?? {};
+        const month     = monthSalesAgg[0]  ?? {};
 
         return res.status(200).json({
             success: true,
@@ -428,10 +480,17 @@ export const getDashboardSummary = async (req, res) => {
                     cashSales:        r2(today.cashAmount   ?? 0),
                     creditSales:      r2(today.creditAmount ?? 0),
                 },
+                yesterday: {
+                    saleCount:        yesterdayData.count        ?? 0,
+                    totalAmount:      r2(yesterdayData.totalAmount  ?? 0),
+                    cashSales:        r2(yesterdayData.cashAmount   ?? 0),
+                    creditSales:      r2(yesterdayData.creditAmount ?? 0),
+                },
                 thisMonth: {
                     saleCount:   month.count       ?? 0,
                     totalAmount: r2(month.totalAmount ?? 0),
                 },
+                trend7Days:            trend,
                 lowStockItemCount:      lowStockCount[0]?.total  ?? 0,
                 outstandingCreditTotal: r2(outstandingTotal[0]?.total ?? 0),
             },
