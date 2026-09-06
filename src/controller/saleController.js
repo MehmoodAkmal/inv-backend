@@ -9,7 +9,7 @@ import StockMovement from "../Schemas/stockMovement.js";
 const objectId = () => joi.string().hex().length(24);
 
 const createSaleSchema = joi.object({
-    branchId:    objectId().required(),
+    branchId:    objectId().optional(),
     paymentType: joi.string().valid("cash", "credit").required(),
     customerId:  objectId().optional().allow(null, ""),
     items: joi.array().items(

@@ -61,7 +61,9 @@ export const login = async (req, res) => {
                 firstName: user.firstName,
                 lastName: user.lastName,
                 email: user.email,
-                role: user.role
+                role: user.role,
+                organizationId: user.organizationId,
+                branchId: user.branchId,
             },
             token: token
         })
@@ -124,6 +126,7 @@ export const signUp = async (req, res) => {
                 email: newUser.email,
                 role: newUser.role,
                 organizationId: newUser.organizationId,
+                branchId: newUser.branchId,
             },
         });
 
