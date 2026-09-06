@@ -1,5 +1,5 @@
 import express from "express";
-import { createBranch, getBranches, updateBranch, deactivateBranch } from "../controller/branchController.js";
+import { createBranch, getBranches, getBranchById, updateBranch, deactivateBranch } from "../controller/branchController.js";
 import { authentication } from "../middleware/authentication.js";
 import { authorization } from "../middleware/authorization.js";
 import { checkPermission } from "../middleware/checkPermission.js";
