@@ -93,6 +93,26 @@ export const getBranches = async (req, res) => {
     }
 };
 
+// GET /branches/:id — any authenticated user can view their own branch
+export const getBranchById = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { organizationId, role, branchId } = req.user;
+        const filter = { _id: id, organizationId };
+        const branch = await Branch.findOne(filter);
+        if (!branch) {
+            return res.status(404).json({ success: false, message: "Branch not found" });
+        }
+        if (role !== "admin" && role !== "superAdmin" && branch._id.toString() !== branchId.toString()) {
+            return res.status(403).json({ success: false, message: "Access denied" });
+        }
+        return res.status(200).json({ success: true, data: branch });
+    } catch (error) {
+        console.error("getBranchById error:", error);
+        return res.status(500).json({ success: false, message: "An unexpected error occurred" });
+    }
+};
+
 // PUT /branches/:id — admin only
 export const updateBranch = async (req, res) => {
     try {
