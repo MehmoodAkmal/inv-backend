@@ -1,5 +1,5 @@
 import jwt from "jsonwebtoken";
-import Organization from "../Schemas/organiztion.js";
+import Organization from "../Schemas/organization.js";
 
 export const authentication = async (req, res, next) => {
     try {

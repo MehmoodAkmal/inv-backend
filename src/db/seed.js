@@ -12,7 +12,7 @@ import mongoose from "mongoose";
 import "dotenv/config";
 
 // ── Model imports ──────────────────────────────────────────────────────────
-import Organization  from "../Schemas/organiztion.js";
+import Organization  from "../Schemas/organization.js";
 import User          from "../Schemas/auth.js";
 import Branch        from "../Schemas/branch.js";
 import Category      from "../Schemas/category.js";

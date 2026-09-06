@@ -1,4 +1,4 @@
-import Organization from "../Schemas/organiztion.js";
+import Organization from "../Schemas/organization.js";
 import Branch from "../Schemas/branch.js";
 import User from "../Schemas/auth.js";
 

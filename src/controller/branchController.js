@@ -1,5 +1,5 @@
 import Branch from "../Schemas/branch.js";
-import Organization from "../Schemas/organiztion.js";
+import Organization from "../Schemas/organization.js";
 import { createBranchSchema, updateBranchSchema } from "../validation/branch.js";
 
 // POST /branches — admin only

@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 import joi from "joi";
-import Organization from "../Schemas/organiztion.js";
+import Organization from "../Schemas/organization.js";
 import User from "../Schemas/auth.js";
 import Branch from "../Schemas/branch.js";
 import Sale from "../Schemas/sale.js";

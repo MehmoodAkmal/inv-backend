@@ -2,7 +2,7 @@ import bcrypt from "bcrypt"
 import User from "../Schemas/auth.js";
 import { loginSchema, signupSchema } from "../validation/auth.js"
 import accessToken from "../utils/accesstoken.js";
-import Organization from "../Schemas/organiztion.js";
+import Organization from "../Schemas/organization.js";
 import mongoose from "mongoose";
 
 export const login = async (req, res) => {
