@@ -14,12 +14,14 @@ import salaryRouter    from "../routes/salaryRoutes.js";
 import reportRouter    from "../routes/reportRoutes.js";
 import organizationRouter from "../routes/organizationRoutes.js";
 import superAdminRouter   from "../routes/superAdminRoutes.js";
+import permissionRouter   from "../routes/permissionRoutes.js";
 
 const prepareRoutes = (app) => {
     const prefix = "/api/v1"
     app.use(`${prefix}`, authRouter)
     app.use(`${prefix}`, branchRouter)
     app.use(`${prefix}`, staffRouter)
+    app.use(`${prefix}`, permissionRouter)
     app.use(`${prefix}`, categoryRouter)
     app.use(`${prefix}`, itemRouter)
     app.use(`${prefix}`, stockRouter)

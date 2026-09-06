@@ -7,6 +7,7 @@ import {
 import { authentication } from "../middleware/authentication.js";
 import { authorization } from "../middleware/authorization.js";
 import { branchScope } from "../middleware/branchScope.js";
+import { checkPermission } from "../middleware/checkPermission.js";
 
 const paymentRouter = express.Router();
 
@@ -15,6 +16,7 @@ paymentRouter.post(
     "/payments",
     authentication,
     authorization("admin", "manager", "cashier"),
+    checkPermission("payments", "record"),
     branchScope,
     recordPayment
 );
@@ -26,6 +28,7 @@ paymentRouter.get(
     "/payments/customer/:customerId",
     authentication,
     authorization("admin", "manager", "cashier"),
+    checkPermission("payments", "viewLedger"),
     branchScope,
     getCustomerLedger
 );
@@ -35,6 +38,7 @@ paymentRouter.get(
     "/payments/outstanding",
     authentication,
     authorization("admin", "manager"),
+    checkPermission("payments", "viewLedger"),
     branchScope,
     getCustomersWithBalance
 );

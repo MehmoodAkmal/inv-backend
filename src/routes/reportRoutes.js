@@ -3,6 +3,7 @@ import { getProfitLoss, getBranchComparison, getLowStockAlert, getDashboardSumma
 import { authentication } from "../middleware/authentication.js";
 import { authorization } from "../middleware/authorization.js";
 import { branchScope } from "../middleware/branchScope.js";
+import { checkPermission } from "../middleware/checkPermission.js";
 import joi from "joi";
 
 // ── Date range validator middleware ────────────────────────────────────────
@@ -28,11 +29,12 @@ const validateDateRange = (req, res, next) => {
 
 const reportRouter = express.Router();
 
-// GET /api/v1/reports/profit-loss — admin, manager
+// GET /api/v1/reports/profit-loss — staff roles; permission middleware decides access
 reportRouter.get(
     "/reports/profit-loss",
     authentication,
-    authorization("admin", "manager"),
+    authorization("admin", "manager", "cashier"),
+    checkPermission("reports", "profitLoss"),
     branchScope,
     validateDateRange,
     getProfitLoss
@@ -47,11 +49,12 @@ reportRouter.get(
     getBranchComparison
 );
 
-// GET /api/v1/reports/low-stock — admin, manager
+// GET /api/v1/reports/low-stock — staff roles; permission middleware decides access
 reportRouter.get(
     "/reports/low-stock",
     authentication,
-    authorization("admin", "manager"),
+    authorization("admin", "manager", "cashier"),
+    checkPermission("reports", "lowStock"),
     branchScope,
     getLowStockAlert
 );
@@ -61,6 +64,7 @@ reportRouter.get(
     "/reports/dashboard-summary",
     authentication,
     authorization("admin", "manager", "cashier"),
+    checkPermission("reports", "dashboard"),
     branchScope,
     getDashboardSummary
 );

@@ -3,14 +3,16 @@ import { addStock, getStockByBranch, getStockMovementHistory } from "../controll
 import { authentication } from "../middleware/authentication.js";
 import { authorization } from "../middleware/authorization.js";
 import { branchScope } from "../middleware/branchScope.js";
+import { checkPermission } from "../middleware/checkPermission.js";
 
 const stockRouter = express.Router();
 
-// POST /api/v1/stock/add — admin, manager
+// POST /api/v1/stock/add — staff roles; permission middleware decides access
 stockRouter.post(
     "/stock/add",
     authentication,
-    authorization("admin", "manager"),
+    authorization("admin", "manager", "cashier"),
+    checkPermission("stock", "addPurchase"),
     branchScope,
     addStock
 );
@@ -20,15 +22,17 @@ stockRouter.get(
     "/stock",
     authentication,
     authorization("admin", "manager", "cashier"),
+    checkPermission("stock", "view"),
     branchScope,
     getStockByBranch
 );
 
-// GET /api/v1/stock/movements — admin, manager
+// GET /api/v1/stock/movements — staff roles; permission middleware decides access
 stockRouter.get(
     "/stock/movements",
     authentication,
-    authorization("admin", "manager"),
+    authorization("admin", "manager", "cashier"),
+    checkPermission("stock", "view"),
     branchScope,
     getStockMovementHistory
 );

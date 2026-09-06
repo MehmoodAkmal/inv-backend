@@ -39,6 +39,7 @@ const round2 = (n) => Math.round(n * 100) / 100;
 
 // ── 1. createSale ──────────────────────────────────────────────────────────
 export const createSale = async (req, res) => {
+    console.log("🚀 ~ createSale ~ req:", req.body)
     try {
         const { error, value } = createSaleSchema.validate(req.body, { abortEarly: true });
         if (error) return fail(res, 400, error.message);
