@@ -7,9 +7,9 @@ import { checkPermission } from "../middleware/checkPermission.js";
 
 const salaryRouter = express.Router();
 
-// POST /api/v1/salary — staff roles; permission middleware decides access
+// POST /api/v1/salary or /api/v1/salary-payments — staff roles; permission middleware decides access
 salaryRouter.post(
-    "/salary",
+    ["/salary", "/salary-payments"],
     authentication,
     authorization("admin", "manager", "cashier"),
     checkPermission("salary", "record"),
@@ -17,9 +17,9 @@ salaryRouter.post(
     recordSalaryPayment
 );
 
-// GET /api/v1/salary — staff roles; permission middleware decides access
+// GET /api/v1/salary or /api/v1/salary-payments — staff roles; permission middleware decides access
 salaryRouter.get(
-    "/salary",
+    ["/salary", "/salary-payments"],
     authentication,
     authorization("admin", "manager", "cashier"),
     checkPermission("salary", "view"),

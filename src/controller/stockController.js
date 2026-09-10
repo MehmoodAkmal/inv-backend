@@ -91,19 +91,31 @@ export const getStockByBranch = async (req, res) => {
     try {
         const { organizationId, role } = req.user;
 
-        let branchId;
+        const filter = { organizationId };
+
         if (role === "admin") {
-            branchId = req.query.branchId;
-            if (!branchId) return fail(res, 400, "branchId query parameter is required for admin");
-            const branch = await Branch.findOne({ _id: branchId, organizationId, isActive: true });
-            if (!branch) return fail(res, 400, "Invalid branch");
+            if (req.query.branchId) {
+                const branch = await Branch.findOne({ _id: req.query.branchId, organizationId, isActive: true });
+                if (!branch) return fail(res, 400, "Invalid branch");
+                filter.branchId = req.query.branchId;
+            }
+            // If branchId is not passed by admin, returns all stock across organization
         } else {
-            branchId = req.allowedBranchId;
+            const branchId = req.allowedBranchId;
             if (!branchId) return fail(res, 400, "No branch assigned to your account");
+            filter.branchId = branchId;
         }
 
-        const stockDocs = await Stock.find({ organizationId, branchId })
-            .populate("itemId", "name sku unit reorderLevel isActive")
+        const stockDocs = await Stock.find(filter)
+            .populate({
+                path: "itemId",
+                select: "name sku unit costPrice sellingPrice reorderLevel isActive categoryId",
+                populate: {
+                    path: "categoryId",
+                    select: "name",
+                },
+            })
+            .populate("branchId", "name")
             .sort({ updatedAt: -1 })
             .lean();
 
@@ -150,7 +162,8 @@ export const getStockMovementHistory = async (req, res) => {
 
         const [movements, total] = await Promise.all([
             StockMovement.find(filter)
-                .populate("itemId",    "name sku")
+                .populate("itemId",    "name sku unit")
+                .populate("branchId",  "name")
                 .populate("createdBy", "firstName lastName")
                 .sort({ createdAt: -1 })
                 .skip(skip)

@@ -96,6 +96,7 @@ export const getStaff = async (req, res) => {
 
         const staff = await User.find(filter)
             .select(SAFE_FIELDS)
+            .populate("branchId", "name")
             .sort({ createdAt: -1 });
 
         return res.status(200).json({

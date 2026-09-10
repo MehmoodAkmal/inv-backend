@@ -1,5 +1,6 @@
 import Customer from "../Schemas/customer.js";
 import Branch from "../Schemas/branch.js";
+import LedgerEntry from "../Schemas/ledgerEntry.js";
 import { createCustomerSchema, updateCustomerSchema } from "../validation/customer.js";
 
 const fail = (res, status, message) =>
@@ -68,13 +69,29 @@ export const getCustomers = async (req, res) => {
         }
 
         const customers = await Customer.find(filter)
+            .populate("branchId", "name")
             .sort({ name: 1 })
             .lean();
+
+        // Attach last transaction date for each customer
+        const customerIds = customers.map((c) => c._id);
+        const latestEntries = await LedgerEntry.aggregate([
+            { $match: { customerId: { $in: customerIds } } },
+            { $sort: { createdAt: -1 } },
+            { $group: { _id: "$customerId", lastDate: { $first: "$createdAt" } } },
+        ]);
+        const dateMap = new Map(latestEntries.map((e) => [e._id.toString(), e.lastDate]));
+
+        const data = customers.map((c) => ({
+            ...c,
+            branch: c.branchId?.name || null,
+            lastTransactionDate: dateMap.get(c._id.toString()) || c.updatedAt || c.createdAt,
+        }));
 
         return res.status(200).json({
             success: true,
             message: "Customers fetched successfully",
-            data:    customers,
+            data,
         });
     } catch (err) {
         console.error("getCustomers error:", err);

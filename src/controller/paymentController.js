@@ -97,12 +97,15 @@ export const getCustomerLedger = async (req, res) => {
         const { startDate, endDate, page, limit } = value;
         const skip = (page - 1) * limit;
 
-        const customer = await Customer.findOne({ _id: customerId, organizationId }).lean();
+        const customer = await Customer.findOne({ _id: customerId, organizationId })
+            .populate("branchId", "name")
+            .lean();
         if (!customer) return fail(res, 404, "Customer not found");
 
         if (role === "manager" || role === "cashier") {
             const locked = req.allowedBranchId?.toString();
-            if (!locked || customer.branchId?.toString() !== locked) {
+            const custBranchId = (customer.branchId?._id ?? customer.branchId)?.toString();
+            if (!locked || custBranchId !== locked) {
                 return fail(res, 404, "Customer not found");
             }
         }
@@ -133,8 +136,13 @@ export const getCustomerLedger = async (req, res) => {
                     _id:            customer._id,
                     name:           customer.name,
                     phone:          customer.phone,
+                    address:        customer.address,
+                    branchId:       customer.branchId?._id || customer.branchId,
+                    branch:         customer.branchId?.name || null,
                     currentBalance: customer.currentBalance,
                     openingBalance: customer.openingBalance,
+                    createdAt:      customer.createdAt,
+                    updatedAt:      customer.updatedAt,
                 },
                 entries,
             },
@@ -152,7 +160,7 @@ export const getCustomersWithBalance = async (req, res) => {
         const { organizationId, role } = req.user;
         const filter = { organizationId, currentBalance: { $gt: 0 }, isActive: true };
 
-        if (role === "manager") {
+        if (role === "manager" || role === "cashier") {
             const locked = req.allowedBranchId;
             if (!locked) return fail(res, 400, "No branch assigned to your account");
             filter.branchId = locked;
@@ -160,15 +168,41 @@ export const getCustomersWithBalance = async (req, res) => {
             filter.branchId = req.query.branchId;
         }
 
-        const customers = await Customer.find(filter)
-            .select("name phone address branchId currentBalance openingBalance")
-            .sort({ currentBalance: -1 })
-            .lean();
+        const now = new Date();
+        const startOfMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+
+        const paymentFilter = {
+            organizationId,
+            type: "payment",
+            createdAt: { $gte: startOfMonth },
+        };
+        if (filter.branchId) {
+            paymentFilter.branchId = filter.branchId;
+        }
+
+        const [customers, collectedAgg] = await Promise.all([
+            Customer.find(filter)
+                .populate("branchId", "name")
+                .sort({ currentBalance: -1 })
+                .lean(),
+            LedgerEntry.aggregate([
+                { $match: paymentFilter },
+                { $group: { _id: null, total: { $sum: "$amount" } } },
+            ]),
+        ]);
+
+        const totalCollectedThisMonth = round2(collectedAgg[0]?.total ?? 0);
+        const totalOutstanding = round2(customers.reduce((sum, c) => sum + (c.currentBalance || 0), 0));
 
         return res.status(200).json({
             success: true,
             message: "Outstanding balances fetched successfully",
             data:    customers,
+            summary: {
+                totalOutstanding,
+                customerCount: customers.length,
+                totalCollectedThisMonth,
+            },
         });
     } catch (err) {
         console.error("getCustomersWithBalance error:", err);

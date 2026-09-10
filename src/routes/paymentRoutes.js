@@ -33,11 +33,11 @@ paymentRouter.get(
     getCustomerLedger
 );
 
-// GET /api/v1/payments/outstanding — admin, manager
+// GET /api/v1/payments/outstanding — admin, manager, cashier
 paymentRouter.get(
     "/payments/outstanding",
     authentication,
-    authorization("admin", "manager"),
+    authorization("admin", "manager", "cashier"),
     checkPermission("payments", "viewLedger"),
     branchScope,
     getCustomersWithBalance

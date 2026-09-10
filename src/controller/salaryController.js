@@ -110,7 +110,8 @@ export const getSalaryPayments = async (req, res) => {
 
         const [payments, total] = await Promise.all([
             SalaryPayment.find(filter)
-                .populate("employeeId", "name designation monthlySalary")
+                .populate("employeeId", "name designation monthlySalary branchId")
+                .populate("branchId", "name")
                 .populate("createdBy",  "firstName lastName")
                 .sort({ month: -1, createdAt: -1 })
                 .skip(skip)

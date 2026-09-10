@@ -51,6 +51,7 @@ export const getEmployees = async (req, res) => {
         }
 
         const employees = await Employee.find(filter)
+            .populate("branchId", "name")
             .sort({ name: 1 })
             .lean();
 

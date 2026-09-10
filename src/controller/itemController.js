@@ -54,6 +54,13 @@ export const getItems = async (req, res) => {
             filter.categoryId = req.query.categoryId;
         }
 
+        if (req.query.search) {
+            filter.$or = [
+                { name: { $regex: req.query.search, $options: "i" } },
+                { sku:  { $regex: req.query.search, $options: "i" } },
+            ];
+        }
+
         const items = await Item.find(filter)
             .populate("categoryId", "name")   // attach category name for display
             .sort({ name: 1 });

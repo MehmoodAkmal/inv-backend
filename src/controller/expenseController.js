@@ -88,6 +88,7 @@ export const getExpenses = async (req, res) => {
         const [expenses, total] = await Promise.all([
             Expense.find(filter)
                 .populate("createdBy", "firstName lastName")
+                .populate("branchId", "name")
                 .sort({ date: -1 })
                 .skip(skip)
                 .limit(limit)
