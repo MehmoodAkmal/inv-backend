@@ -1,6 +1,13 @@
 import Category from "../Schemas/category.js";
 import { createCategorySchema, updateCategorySchema } from "../validation/category.js";
 
+const formatCategoryName = (name) => {
+    if (!name || typeof name !== "string") return name;
+    const trimmed = name.trim();
+    if (!trimmed) return trimmed;
+    return trimmed.replace(/\b([a-z])/g, (char) => char.toUpperCase());
+};
+
 // POST /categories — admin only
 export const createCategory = async (req, res) => {
     try {
@@ -10,8 +17,9 @@ export const createCategory = async (req, res) => {
         }
 
         const organizationId = req.user.organizationId;
+        const formattedName = formatCategoryName(value.name);
 
-        const category = await Category.create({ organizationId, name: value.name });
+        const category = await Category.create({ organizationId, name: formattedName });
 
         return res.status(201).json({
             success: true,
@@ -44,10 +52,18 @@ export const getCategories = async (req, res) => {
 
         const categories = await Category.find(filter).sort({ name: 1 });
 
+        const formattedCategories = categories.map((cat) => {
+            const doc = cat.toObject ? cat.toObject() : { ...cat };
+            if (doc.name) {
+                doc.name = formatCategoryName(doc.name);
+            }
+            return doc;
+        });
+
         return res.status(200).json({
             success: true,
             message: "Categories fetched successfully",
-            data: categories,
+            data: formattedCategories,
         });
     } catch (error) {
         console.error("getCategories error:", error);
@@ -72,9 +88,14 @@ export const updateCategory = async (req, res) => {
             return res.status(404).json({ success: false, message: "Category not found" });
         }
 
+        const updatePayload = { ...value };
+        if (updatePayload.name) {
+            updatePayload.name = formatCategoryName(updatePayload.name);
+        }
+
         const updated = await Category.findByIdAndUpdate(
             id,
-            { $set: value },
+            { $set: updatePayload },
             { new: true, runValidators: true }
         );
 
