@@ -12,8 +12,8 @@ export const SYSTEM_DEFAULTS = {
         expenses:   { view: true,  create: true, edit: true },
         salary:     { view: true,  record: true },
         reports:    { dashboard: true, profitLoss: true, lowStock: true },
-        categories: { view: true,  create: false, edit: false, deactivate: false },
-        items:      { view: true,  create: false, edit: false, deactivate: false },
+        categories: { view: true,  create: true,  edit: false, deactivate: false },
+        items:      { view: true,  create: true,  edit: false, deactivate: false },
         branches:   { view: false, create: false, edit: false, deactivate: false },
     },
     cashier: {
