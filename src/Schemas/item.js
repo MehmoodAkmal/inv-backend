@@ -57,6 +57,9 @@ const itemSchema = new mongoose.Schema({
 // Compound index — primary access pattern is listing items by org + category
 itemSchema.index({ organizationId: 1, categoryId: 1 });
 
+// Ensure SKU is unique within each organization (sparse allows null/undefined for legacy items)
+itemSchema.index({ organizationId: 1, sku: 1 }, { unique: true, sparse: true });
+
 // Pre-save hook — intentionally left with no sellingPrice > costPrice enforcement.
 // If you want to emit a warning (not an error) in application logs when an item
 // is saved below cost, add that logic here:

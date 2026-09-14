@@ -2,6 +2,7 @@ import express from "express";
 import {
     createItem,
     getItems,
+    getNextSku,
     updateItem,
     deactivateItem,
 } from "../controller/itemController.js";
@@ -11,6 +12,7 @@ import { checkPermission } from "../middleware/checkPermission.js";
 
 const itemRouter = express.Router();
 
+itemRouter.get("/items/generate-sku", authentication, authorization("admin", "manager", "cashier"), checkPermission("items", "view"), getNextSku);
 itemRouter.post("/items",     authentication, authorization("admin", "manager", "cashier"), checkPermission("items", "create"), createItem);
 itemRouter.get("/items",      authentication, authorization("admin", "manager", "cashier"), checkPermission("items", "view"), getItems);
 itemRouter.put("/items/:id",  authentication, authorization("admin", "manager", "cashier"), checkPermission("items", "edit"), updateItem);
