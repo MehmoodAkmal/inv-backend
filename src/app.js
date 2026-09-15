@@ -1,3 +1,6 @@
+import crypto from "node:crypto";
+if (!globalThis.crypto) globalThis.crypto = crypto;
+
 import express from "express";
 import dbConnection from "./db/db.js";
 import dotenv from "dotenv"
@@ -12,7 +15,20 @@ dotenv.config();
 app.use(helmet());
 app.use(cors());
 app.use(express.json());
-const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 100 });
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: process.env.RATE_LIMIT_MAX
+    ? Number(process.env.RATE_LIMIT_MAX)
+    : process.env.NODE_ENV === "production"
+    ? 1000
+    : 10000,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: "Too many requests from this IP, please try again after a few minutes",
+  },
+});
 app.use(limiter);
 dbConnection()
 prepareRoutes(app);
