@@ -51,8 +51,11 @@ export const login = async (req, res) => {
             return res.status(400).json({
                 success: false,
                 message: "jwt failed"
-            })
+            });
         }
+        const org = user.organizationId ? await Organization.findById(user.organizationId).lean() : null;
+        const currency = org?.currency || { code: "PKR", symbol: "Rs." };
+
         return res.status(200).json({
             success: true,
             message: `Welcom Back ${user.firstName}`,
@@ -64,6 +67,7 @@ export const login = async (req, res) => {
                 role: user.role,
                 organizationId: user.organizationId,
                 branchId: user.branchId,
+                currency: currency,
             },
             token: token
         })
@@ -80,17 +84,23 @@ export const signUp = async (req, res) => {
             return res.status(400).json({ success: false, message: error.message });
         }
 
-        const { firstName, lastName, email, password, organizationName } = value;
+        const { firstName, lastName, email, password, organizationName, currency, currencyCode, currencySymbol } = value;
 
         const existingUser = await User.findOne({ email });
         if (existingUser) {
             return res.status(409).json({ success: false, message: "Email already exists" });
         }
 
+        const resolvedCurrency = {
+            code: (currency?.code || currencyCode || 'PKR').toUpperCase().trim(),
+            symbol: (currency?.symbol || currencySymbol || 'Rs.').trim(),
+        };
+
         // Step 1: create the Organization
-        const newOrg = await Organization.create(
-            { name: organizationName },
-        );
+        const newOrg = await Organization.create({
+            name: organizationName,
+            currency: resolvedCurrency,
+        });
 
         // Step 2: create the owner user, tied to that org
         const newUser = await User.create(
@@ -127,6 +137,7 @@ export const signUp = async (req, res) => {
                 role: newUser.role,
                 organizationId: newUser.organizationId,
                 branchId: newUser.branchId,
+                currency: newOrg.currency,
             },
         });
 

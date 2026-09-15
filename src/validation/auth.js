@@ -11,6 +11,12 @@ export const signupSchema = joi.object({
   email: joi.string().email().required(),
   password: joi.string().min(6).max(128).required(),
   organizationName: joi.string().min(2).max(100).required(),
+  currency: joi.object({
+    code: joi.string().max(10).optional(),
+    symbol: joi.string().max(10).optional(),
+  }).optional(),
+  currencyCode: joi.string().max(10).optional(),
+  currencySymbol: joi.string().max(10).optional(),
 });
 
 export const createStaffSchema = joi.object({

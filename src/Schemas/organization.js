@@ -24,6 +24,19 @@ const organizationSchema = new mongoose.Schema({
         type: Number,
         default: 1, // free tier limit, for example
     },
+    currency: {
+        code: {
+            type: String,
+            default: "PKR",
+            uppercase: true,
+            trim: true,
+        },
+        symbol: {
+            type: String,
+            default: "Rs.",
+            trim: true,
+        },
+    },
 }, { timestamps: true });
 
 const Organization = mongoose.model("Organization", organizationSchema);
