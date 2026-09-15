@@ -2,16 +2,20 @@ import mongoose from "mongoose";
 import joi from "joi";
 import Stock from "../Schemas/stock.js";
 import StockMovement from "../Schemas/stockMovement.js";
+import StockBatch from "../Schemas/stockBatch.js";
 import Item from "../Schemas/item.js";
 import Branch from "../Schemas/branch.js";
 
 const objectId = () => joi.string().hex().length(24);
 
 const addStockSchema = joi.object({
-    itemId:   objectId().required(),
-    branchId: objectId().required(),
-    quantity: joi.number().integer().min(1).required(),
-    note:     joi.string().max(500).optional().allow(""),
+    itemId:       objectId().required(),
+    branchId:     objectId().required(),
+    quantity:     joi.number().positive().required(),
+    costPrice:    joi.number().min(0).optional(),
+    sellingPrice: joi.number().min(0).optional(),
+    batchNumber:  joi.string().trim().max(50).optional().allow(""),
+    note:         joi.string().max(500).optional().allow(""),
 });
 
 const movementQuerySchema = joi.object({
@@ -24,14 +28,14 @@ const movementQuerySchema = joi.object({
 const fail = (res, status, message) =>
     res.status(status).json({ success: false, message });
 
-// ── 1. addStock (purchase entry) ───────────────────────────────────────────
+// ── 1. addStock (purchase entry with FIFO batch tracking) ─────────────────
 // POST /stock/add — admin, manager
 export const addStock = async (req, res) => {
     try {
         const { error, value } = addStockSchema.validate(req.body);
         if (error) return fail(res, 400, error.message);
 
-        const { itemId, branchId, quantity, note } = value;
+        const { itemId, branchId, quantity, costPrice, sellingPrice, batchNumber, note } = value;
         const { organizationId, role, id: userId } = req.user;
 
         if (role === "manager") {
@@ -47,7 +51,29 @@ export const addStock = async (req, res) => {
         const branch = await Branch.findOne({ _id: branchId, organizationId, isActive: true });
         if (!branch) return fail(res, 400, "Invalid branch");
 
-        // Find-or-create stock document
+        // Determine effective cost price for this batch
+        const costPriceToUse = costPrice !== undefined ? Number(costPrice) : item.costPrice;
+
+        // Auto-generate batch code if not provided
+        const batchCode = batchNumber && batchNumber.trim()
+            ? batchNumber.trim().toUpperCase()
+            : `BATCH-${Date.now().toString(36).toUpperCase()}-${Math.floor(Math.random() * 900 + 100)}`;
+
+        // Create new inventory batch (FIFO lot)
+        const [batch] = await StockBatch.create([{
+            organizationId,
+            branchId,
+            itemId,
+            batchNumber:       batchCode,
+            costPrice:         costPriceToUse,
+            initialQuantity:   quantity,
+            remainingQuantity: quantity,
+            status:            "active",
+            note:              note || null,
+            createdBy:         userId,
+        }]);
+
+        // Find-or-create total stock document
         let stock = await Stock.findOne({ organizationId, branchId, itemId });
         if (!stock) {
             stock = await Stock.create({ organizationId, branchId, itemId, quantity: 0 });
@@ -59,8 +85,21 @@ export const addStock = async (req, res) => {
         stock.quantity = newQuantity;
         await stock.save();
 
-        // Write immutable movement record via native driver (bypasses Mongoose
-        // update/delete immutability hooks — create is always allowed)
+        // Update item default cost and selling price if provided
+        let priceUpdated = false;
+        if (costPrice !== undefined) {
+            item.costPrice = costPriceToUse;
+            priceUpdated = true;
+        }
+        if (sellingPrice !== undefined) {
+            item.sellingPrice = Number(sellingPrice);
+            priceUpdated = true;
+        }
+        if (priceUpdated) {
+            await item.save();
+        }
+
+        // Write immutable movement record
         const [movement] = await StockMovement.create([{
             organizationId,
             branchId,
@@ -69,15 +108,17 @@ export const addStock = async (req, res) => {
             quantity,
             previousQuantity,
             newQuantity,
-            refId:            null,
+            refId:            batch._id,
+            batchId:          batch._id,
+            costPrice:        costPriceToUse,
             note:             note || null,
             createdBy:        userId,
         }]);
 
         return res.status(201).json({
             success: true,
-            message: "Stock added successfully",
-            data: { stock, movement },
+            message: "Stock added successfully with batch tracking",
+            data: { stock, batch, movement },
         });
     } catch (err) {
         console.error("addStock error:", err);
@@ -183,3 +224,39 @@ export const getStockMovementHistory = async (req, res) => {
         return fail(res, 500, "An unexpected error occurred");
     }
 };
+
+// ── 4. getStockBatches ─────────────────────────────────────────────────────
+// GET /stock/batches — admin, manager, cashier
+export const getStockBatches = async (req, res) => {
+    try {
+        const { organizationId, role } = req.user;
+        const { itemId, branchId, status } = req.query;
+
+        const filter = { organizationId };
+        if (itemId) filter.itemId = itemId;
+        if (branchId) filter.branchId = branchId;
+        if (status) filter.status = status;
+        else filter.status = "active";
+
+        if (role === "manager") {
+            const allowed = req.allowedBranchId?.toString();
+            if (allowed) filter.branchId = allowed;
+        }
+
+        const batches = await StockBatch.find(filter)
+            .populate("itemId", "name sku unit costPrice sellingPrice")
+            .populate("branchId", "name")
+            .sort({ createdAt: 1 })
+            .lean();
+
+        return res.status(200).json({
+            success: true,
+            message: "Stock batches fetched successfully",
+            data: batches,
+        });
+    } catch (err) {
+        console.error("getStockBatches error:", err);
+        return fail(res, 500, "An unexpected error occurred");
+    }
+};
+

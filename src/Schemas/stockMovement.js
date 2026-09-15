@@ -43,6 +43,15 @@ const stockMovementSchema = new mongoose.Schema({
         // No `ref` set here — the appropriate model depends on `type`,
         // so populate must be done manually in the controller when needed.
     },
+    batchId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "StockBatch",
+        default: null,
+    },
+    costPrice: {
+        type: Number,
+        default: null,
+    },
     note: {
         type: String,
         trim: true,

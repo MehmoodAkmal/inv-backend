@@ -4,6 +4,7 @@ import Customer from "../Schemas/customer.js";
 import LedgerEntry from "../Schemas/ledgerEntry.js";
 import Item from "../Schemas/item.js";
 import Stock from "../Schemas/stock.js";
+import StockBatch from "../Schemas/stockBatch.js";
 import StockMovement from "../Schemas/stockMovement.js";
 
 const objectId = () => joi.string().hex().length(24);
@@ -78,19 +79,94 @@ export const createSale = async (req, res) => {
             if (!customer) return fail(res, 400, "Customer not found or does not belong to your organization");
         }
 
-        // ── Build line items ───────────────────────────────────────────────
-        const saleItems = value.items.map((line) => {
-            const item      = itemMap[line.itemId];
+        // ── Check stock availability for all items first ───────────────────
+        const stockDocs = {};
+        for (const line of value.items) {
+            const item = itemMap[line.itemId];
+            const stockDoc = await Stock.findOne({
+                organizationId, branchId, itemId: line.itemId,
+            });
+            const available = stockDoc?.quantity ?? 0;
+            if (available < line.quantity) {
+                return fail(res, 400, `Insufficient stock for "${item.name}" (available: ${available})`);
+            }
+            stockDocs[line.itemId.toString()] = stockDoc;
+        }
+
+        // ── Allocate stock from batches in FIFO order ──────────────────────
+        const saleItems = [];
+        const batchesToSave = [];
+
+        for (const line of value.items) {
+            const item = itemMap[line.itemId];
             const lineTotal = round2(line.quantity * line.sellingPrice);
-            return {
+
+            // Fetch active batches for this item at this branch, oldest first (FIFO)
+            const batches = await StockBatch.find({
+                organizationId,
+                branchId,
+                itemId: line.itemId,
+                status: "active",
+                remainingQuantity: { $gt: 0 },
+            }).sort({ createdAt: 1 });
+
+            // Backward compatibility: If item has stock but no batches (legacy data),
+            // auto-create an opening batch using item.costPrice
+            const totalBatchQty = batches.reduce((sum, b) => sum + b.remainingQuantity, 0);
+            if (totalBatchQty < line.quantity) {
+                const missingQty = line.quantity - totalBatchQty;
+                const [openingBatch] = await StockBatch.create([{
+                    organizationId,
+                    branchId,
+                    itemId: line.itemId,
+                    batchNumber: `OPENING-${Date.now().toString(36).toUpperCase()}`,
+                    costPrice: item.costPrice,
+                    initialQuantity: missingQty,
+                    remainingQuantity: missingQty,
+                    status: "active",
+                    note: "Auto-created opening batch for legacy unbatched stock",
+                    createdBy: userId,
+                }]);
+                batches.push(openingBatch);
+            }
+
+            let needed = line.quantity;
+            let lineCOGS = 0;
+            const batchAllocations = [];
+
+            for (const b of batches) {
+                if (needed <= 0) break;
+                const deduct = Math.min(b.remainingQuantity, needed);
+                b.remainingQuantity -= deduct;
+                if (b.remainingQuantity <= 0) {
+                    b.remainingQuantity = 0;
+                    b.status = "depleted";
+                }
+                batchesToSave.push(b);
+
+                batchAllocations.push({
+                    batchId:     b._id,
+                    batchNumber: b.batchNumber,
+                    quantity:    deduct,
+                    costPrice:   b.costPrice,
+                });
+
+                lineCOGS += deduct * b.costPrice;
+                needed -= deduct;
+            }
+
+            const costPriceAtSale = line.quantity > 0 ? round2(lineCOGS / line.quantity) : item.costPrice;
+
+            saleItems.push({
                 itemId:          item._id,
                 itemName:        item.name,
                 quantity:        line.quantity,
                 sellingPrice:    line.sellingPrice,
-                costPriceAtSale: item.costPrice,
+                costPriceAtSale,
                 lineTotal,
-            };
-        });
+                batchAllocations,
+            });
+        }
 
         const subtotal    = round2(saleItems.reduce((s, l) => s + l.lineTotal, 0));
         const totalAmount = round2(subtotal - (discount || 0));
@@ -103,19 +179,6 @@ export const createSale = async (req, res) => {
         }
 
         const balanceDue = round2(totalAmount - amountPaid);
-
-        // ── Check stock availability for all items first ───────────────────
-        const stockDocs = {};
-        for (const line of saleItems) {
-            const stockDoc = await Stock.findOne({
-                organizationId, branchId, itemId: line.itemId,
-            });
-            const available = stockDoc?.quantity ?? 0;
-            if (available < line.quantity) {
-                return fail(res, 400, `Insufficient stock for "${line.itemName}" (available: ${available})`);
-            }
-            stockDocs[line.itemId.toString()] = stockDoc;
-        }
 
         // ── Create Sale ────────────────────────────────────────────────────
         const sale = await Sale.create({
@@ -132,6 +195,11 @@ export const createSale = async (req, res) => {
             createdBy:   userId,
             note:        note || null,
         });
+
+        // ── Save updated batches ───────────────────────────────────────────
+        for (const b of batchesToSave) {
+            await b.save();
+        }
 
         // ── Decrement stock + create StockMovements ────────────────────────
         for (const line of saleItems) {

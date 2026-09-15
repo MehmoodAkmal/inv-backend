@@ -43,6 +43,23 @@ const saleItemSchema = new mongoose.Schema({
         // quantity * sellingPrice — pre-computed and stored so aggregation
         // queries don't need to multiply on every read.
     },
+    batchAllocations: [{
+        batchId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "StockBatch",
+        },
+        batchNumber: {
+            type: String,
+        },
+        quantity: {
+            type: Number,
+            required: true,
+        },
+        costPrice: {
+            type: Number,
+            required: true,
+        },
+    }],
 }, { _id: true }); // keep _id on subdocs so line items can be referenced individually
 
 // ── Sale document ─────────────────────────────────────────────────────────

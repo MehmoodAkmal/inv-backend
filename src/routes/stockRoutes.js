@@ -1,5 +1,5 @@
 import express from "express";
-import { addStock, getStockByBranch, getStockMovementHistory } from "../controller/stockController.js";
+import { addStock, getStockByBranch, getStockMovementHistory, getStockBatches } from "../controller/stockController.js";
 import { authentication } from "../middleware/authentication.js";
 import { authorization } from "../middleware/authorization.js";
 import { branchScope } from "../middleware/branchScope.js";
@@ -25,6 +25,16 @@ stockRouter.get(
     checkPermission("stock", "view"),
     branchScope,
     getStockByBranch
+);
+
+// GET /api/v1/stock/batches — staff roles; view active batches
+stockRouter.get(
+    "/stock/batches",
+    authentication,
+    authorization("admin", "manager", "cashier"),
+    checkPermission("stock", "view"),
+    branchScope,
+    getStockBatches
 );
 
 // GET /api/v1/stock/movements — staff roles; permission middleware decides access
