@@ -20,13 +20,13 @@ const limiter = rateLimit({
   max: process.env.RATE_LIMIT_MAX
     ? Number(process.env.RATE_LIMIT_MAX)
     : process.env.NODE_ENV === "production"
-    ? 1000
+    ? 2000
     : 10000,
   standardHeaders: true,
   legacyHeaders: false,
   message: {
     success: false,
-    message: "Too many requests from this IP, please try again after a few minutes",
+    message: "You're sending too many requests. Please wait a moment and try again.",
   },
 });
 app.use(limiter);
