@@ -16,9 +16,11 @@ export const createCustomer = async (req, res) => {
 
         // Non-admin roles are locked to their own branch
         let branchId = value.branchId;
-        if (role === "manager") {
+        if (role === "manager" || role === "cashier") {
             if (!req.allowedBranchId) return fail(res, 400, "No branch assigned to your account");
             branchId = req.allowedBranchId.toString();
+        } else if (!branchId) {
+            return fail(res, 400, "Branch is required");
         }
 
         // Verify branch belongs to this org and is active
@@ -109,7 +111,7 @@ export const updateCustomer = async (req, res) => {
         const { id } = req.params;
 
         const filter = { _id: id, organizationId };
-        if (role === "manager") {
+        if (role === "manager" || role === "cashier") {
             const locked = req.allowedBranchId;
             if (!locked) return fail(res, 400, "No branch assigned to your account");
             filter.branchId = locked;
@@ -142,7 +144,7 @@ export const deactivateCustomer = async (req, res) => {
         const { id } = req.params;
 
         const filter = { _id: id, organizationId };
-        if (role === "manager") {
+        if (role === "manager" || role === "cashier") {
             const locked = req.allowedBranchId;
             if (!locked) return fail(res, 400, "No branch assigned to your account");
             filter.branchId = locked;

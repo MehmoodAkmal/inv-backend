@@ -3,7 +3,7 @@ import joi from "joi";
 const objectId = () => joi.string().hex().length(24);
 
 export const createCustomerSchema = joi.object({
-    branchId: objectId().required(),
+    branchId: objectId().optional().allow("", null),
     name:     joi.string().min(2).max(100).trim().required(),
     phone:    joi.string().max(20).trim().optional().allow("", null),
     address:  joi.string().max(200).trim().optional().allow("", null),
