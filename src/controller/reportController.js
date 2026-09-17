@@ -314,7 +314,7 @@ export const getLowStockAlert = async (req, res) => {
                 foreignField: "_id",
                 as:           "branch",
             }},
-            { $unwind: { path: "$branch", preserveNullAndEmpty: true } },
+            { $unwind: { path: "$branch", preserveNullAndEmptyArrays: true } },
 
             // Project only what the frontend needs
             { $project: {
