@@ -11,12 +11,13 @@ import {
 } from "../controller/superAdminController.js";
 import { authentication } from "../middleware/authentication.js";
 import { authorization } from "../middleware/authorization.js";
+import { superAdminGuard } from "../middleware/superAdminGuard.js";
 
 const superAdminRouter = express.Router();
 
-// Every route in this file requires superAdmin authentication.
-// The authorization middleware rejects all other roles with 403.
-const guard = [authentication, authorization("superAdmin")];
+// Every route in this file requires superAdmin authentication, role verification,
+// optional security secret validation, and audit logging.
+const guard = [authentication, authorization("superAdmin"), superAdminGuard];
 
 // Platform-level stats (counts only — no business data)
 superAdminRouter.get("/admin/stats",                             ...guard, getPlatformStats);
