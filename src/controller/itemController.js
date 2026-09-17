@@ -133,6 +133,18 @@ export const createItem = async (req, res) => {
             sku = await generateItemSku(organizationId, value.name, category.name);
         }
 
+        if (value.barcode) {
+            const barcode = value.barcode.trim();
+            const existingBarcode = await Item.findOne({ organizationId, barcode });
+            if (existingBarcode) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Barcode "${barcode}" is already in use by item "${existingBarcode.name}".`,
+                });
+            }
+            value.barcode = barcode;
+        }
+
         const item = await Item.create({
             ...value,
             sku,
@@ -146,9 +158,12 @@ export const createItem = async (req, res) => {
         });
     } catch (error) {
         if (error.code === 11000) {
+            const isBarcode = error.keyPattern?.barcode;
             return res.status(400).json({
                 success: false,
-                message: "An item with this SKU already exists in your organization.",
+                message: isBarcode
+                    ? "An item with this Barcode already exists in your organization."
+                    : "An item with this SKU already exists in your organization.",
             });
         }
         console.error("createItem error:", error);
@@ -172,10 +187,15 @@ export const getItems = async (req, res) => {
             filter.categoryId = req.query.categoryId;
         }
 
+        if (req.query.barcode) {
+            filter.barcode = req.query.barcode.trim();
+        }
+
         if (req.query.search) {
             filter.$or = [
-                { name: { $regex: req.query.search, $options: "i" } },
-                { sku:  { $regex: req.query.search, $options: "i" } },
+                { name:    { $regex: req.query.search, $options: "i" } },
+                { sku:     { $regex: req.query.search, $options: "i" } },
+                { barcode: { $regex: req.query.search, $options: "i" } },
             ];
         }
 
@@ -238,6 +258,22 @@ export const updateItem = async (req, res) => {
             value.sku = sku;
         }
 
+        if (value.barcode !== undefined) {
+            const barcode = value.barcode ? value.barcode.trim() : null;
+            if (barcode) {
+                const existingBarcode = await Item.findOne({ organizationId, barcode, _id: { $ne: id } });
+                if (existingBarcode) {
+                    return res.status(400).json({
+                        success: false,
+                        message: `Barcode "${barcode}" is already in use by item "${existingBarcode.name}".`,
+                    });
+                }
+                value.barcode = barcode;
+            } else {
+                value.barcode = undefined;
+            }
+        }
+
         const updated = await Item.findByIdAndUpdate(
             id,
             { $set: value },
@@ -251,9 +287,12 @@ export const updateItem = async (req, res) => {
         });
     } catch (error) {
         if (error.code === 11000) {
+            const isBarcode = error.keyPattern?.barcode;
             return res.status(400).json({
                 success: false,
-                message: "An item with this SKU already exists in your organization.",
+                message: isBarcode
+                    ? "An item with this Barcode already exists in your organization."
+                    : "An item with this SKU already exists in your organization.",
             });
         }
         console.error("updateItem error:", error);

@@ -21,6 +21,10 @@ const itemSchema = new mongoose.Schema({
         trim: true,
         uppercase: true, // stored in uppercase, e.g. "SEED-001"
     },
+    barcode: {
+        type: String,
+        trim: true,
+    },
     unit: {
         type: String,
         required: true,
@@ -59,6 +63,9 @@ itemSchema.index({ organizationId: 1, categoryId: 1 });
 
 // Ensure SKU is unique within each organization (sparse allows null/undefined for legacy items)
 itemSchema.index({ organizationId: 1, sku: 1 }, { unique: true, sparse: true });
+
+// Ensure Barcode is unique within each organization if provided
+itemSchema.index({ organizationId: 1, barcode: 1 }, { unique: true, sparse: true });
 
 // Pre-save hook — intentionally left with no sellingPrice > costPrice enforcement.
 // If you want to emit a warning (not an error) in application logs when an item
