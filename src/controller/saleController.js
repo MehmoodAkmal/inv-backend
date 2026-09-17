@@ -311,7 +311,6 @@ export const getSales = async (req, res) => {
             Sale.find(filter)
                 .populate("customerId", "name phone")
                 .populate("createdBy",  "firstName lastName")
-                .select("-items")
                 .sort({ createdAt: -1 })
                 .skip(skip)
                 .limit(limit)
