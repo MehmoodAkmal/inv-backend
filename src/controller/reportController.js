@@ -6,6 +6,8 @@ import SalaryPayment from "../Schemas/salaryPayment.js";
 import Stock from "../Schemas/stock.js";
 import Customer from "../Schemas/customer.js";
 import Branch from "../Schemas/branch.js";
+import Item from "../Schemas/item.js";
+import LedgerEntry from "../Schemas/ledgerEntry.js";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -498,5 +500,505 @@ export const getDashboardSummary = async (req, res) => {
     } catch (err) {
         console.error("getDashboardSummary error:", err);
         return fail(res, 500, "An unexpected error occurred");
+    }
+};
+
+// ── 5. getComprehensiveReport ─────────────────────────────────────────────
+// GET /reports/comprehensive — admin only
+export const getComprehensiveReport = async (req, res) => {
+    try {
+        if (req.user.role !== "admin") {
+            return fail(res, 403, "Access denied. Only administrators can generate executive reports.");
+        }
+
+        const { organizationId } = req.user;
+        const orgId = new mongoose.Types.ObjectId(organizationId);
+
+        const {
+            interval = "monthly", // "daily" | "monthly" | "6months" | "annually" | "custom"
+            date,
+            month,
+            year,
+            half,
+            startDate,
+            endDate,
+            branchId,
+        } = req.query;
+
+        // 1. Resolve date range
+        let start, end, periodLabel;
+        const now = new Date();
+
+        if (interval === "daily") {
+            const dStr = date ? String(date).slice(0, 10) : now.toISOString().slice(0, 10);
+            start = dayStart(dStr);
+            end   = dayEnd(dStr);
+            periodLabel = `Daily (${dStr})`;
+        } else if (interval === "monthly") {
+            const y = year ? parseInt(year, 10) : now.getUTCFullYear();
+            const m = month ? parseInt(month, 10) : (now.getUTCMonth() + 1);
+            const padM = String(m).padStart(2, "0");
+            const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
+            start = new Date(`${y}-${padM}-01T00:00:00.000Z`);
+            end   = new Date(`${y}-${padM}-${String(lastDay).padStart(2, "0")}T23:59:59.999Z`);
+            const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+            periodLabel = `Monthly (${monthNames[m - 1]} ${y})`;
+        } else if (interval === "6months") {
+            const y = year ? parseInt(year, 10) : now.getUTCFullYear();
+            const h = half ? String(half).toUpperCase() : (now.getUTCMonth() < 6 ? "H1" : "H2");
+            if (h === "H1") {
+                start = new Date(`${y}-01-01T00:00:00.000Z`);
+                end   = new Date(`${y}-06-30T23:59:59.999Z`);
+                periodLabel = `6 Months (H1 Jan–Jun ${y})`;
+            } else if (h === "H2") {
+                start = new Date(`${y}-07-01T00:00:00.000Z`);
+                end   = new Date(`${y}-12-31T23:59:59.999Z`);
+                periodLabel = `6 Months (H2 Jul–Dec ${y})`;
+            } else {
+                const sixMonthsAgo = new Date(now);
+                sixMonthsAgo.setUTCMonth(sixMonthsAgo.getUTCMonth() - 6);
+                start = new Date(`${sixMonthsAgo.toISOString().slice(0, 10)}T00:00:00.000Z`);
+                end   = new Date(`${now.toISOString().slice(0, 10)}T23:59:59.999Z`);
+                periodLabel = `Last 6 Months (Rolling)`;
+            }
+        } else if (interval === "annually") {
+            const y = year ? parseInt(year, 10) : now.getUTCFullYear();
+            start = new Date(`${y}-01-01T00:00:00.000Z`);
+            end   = new Date(`${y}-12-31T23:59:59.999Z`);
+            periodLabel = `Annual (${y})`;
+        } else if (interval === "custom") {
+            if (!startDate || !endDate) {
+                return fail(res, 400, "startDate and endDate are required for custom interval");
+            }
+            const sStr = String(startDate).slice(0, 10);
+            const eStr = String(endDate).slice(0, 10);
+            start = dayStart(sStr);
+            end   = dayEnd(eStr);
+            if (end < start) {
+                return fail(res, 400, "endDate cannot be before startDate");
+            }
+            periodLabel = `Custom (${sStr} to ${eStr})`;
+        } else {
+            return fail(res, 400, "Invalid interval. Allowed: daily, monthly, 6months, annually, custom");
+        }
+
+        // 2. Resolve branch scoping
+        let targetBranchId = null;
+        let branchInfo = null;
+        if (branchId && branchId !== "all" && branchId !== "null" && branchId !== "undefined") {
+            if (!mongoose.Types.ObjectId.isValid(branchId)) {
+                return fail(res, 400, "Invalid branch ID");
+            }
+            targetBranchId = new mongoose.Types.ObjectId(branchId);
+            branchInfo = await Branch.findOne({ _id: targetBranchId, organizationId: orgId, isActive: true }).lean();
+            if (!branchInfo) {
+                return fail(res, 400, "Branch not found or inactive");
+            }
+        }
+
+        // Base match objects
+        const baseMatch = targetBranchId
+            ? { organizationId: orgId, branchId: targetBranchId }
+            : { organizationId: orgId };
+
+        const saleMatch     = { ...baseMatch, createdAt: { $gte: start, $lte: end } };
+        const expenseMatch  = { ...baseMatch, date:      { $gte: start, $lte: end } };
+        const salaryMatch   = { ...baseMatch, paidOn:    { $gte: start, $lte: end } };
+        const ledgerMatch   = { ...baseMatch, createdAt: { $gte: start, $lte: end } };
+        const stockMatch    = { ...baseMatch };
+        const customerMatch = { ...baseMatch, isActive: true };
+
+        // Determine timeline grouping format
+        const diffDays = Math.ceil((end - start) / (1000 * 60 * 60 * 24));
+        const groupFormat = diffDays <= 45 ? "%Y-%m-%d" : "%Y-%m";
+
+        // 3. Parallel database queries
+        const [
+            salesAgg,
+            categorySalesAgg,
+            expensesAgg,
+            salariesAgg,
+            stockValuationAgg,
+            receivablesAgg,
+            ledgerAgg,
+            salesTimelineAgg,
+            expenseTimelineAgg,
+            branchList,
+            branchSalesAgg,
+            branchExpensesAgg,
+            branchSalariesAgg,
+        ] = await Promise.all([
+            // Sales Summary, COGS & Top 5 items
+            Sale.aggregate([
+                { $match: saleMatch },
+                { $facet: {
+                    summary: [
+                        { $group: {
+                            _id: null,
+                            totalRevenue:     { $sum: "$totalAmount" },
+                            totalCashSales:   { $sum: { $cond: [{ $eq: ["$paymentType", "cash"] }, "$totalAmount", 0] } },
+                            totalCreditSales: { $sum: { $cond: [{ $eq: ["$paymentType", "credit"] }, "$totalAmount", 0] } },
+                            totalDiscount:    { $sum: "$discount" },
+                            saleCount:        { $sum: 1 },
+                        }},
+                    ],
+                    cogs: [
+                        { $unwind: "$items" },
+                        { $group: {
+                            _id: null,
+                            totalCOGS:      { $sum: { $multiply: ["$items.quantity", "$items.costPriceAtSale"] } },
+                            totalUnitsSold: { $sum: "$items.quantity" },
+                        }},
+                    ],
+                    topItems: [
+                        { $unwind: "$items" },
+                        { $group: {
+                            _id: "$items.itemId",
+                            quantitySold:     { $sum: "$items.quantity" },
+                            revenueGenerated: { $sum: "$items.lineTotal" },
+                        }},
+                        { $sort: { revenueGenerated: -1 } },
+                        { $limit: 5 },
+                        { $lookup: {
+                            from: "items",
+                            localField: "_id",
+                            foreignField: "_id",
+                            as: "itemDoc",
+                        }},
+                        { $unwind: { path: "$itemDoc", preserveNullAndEmptyArrays: true } },
+                        { $project: {
+                            itemId: "$_id",
+                            name: { $ifNull: ["$itemDoc.name", "Unknown Item"] },
+                            sku:  { $ifNull: ["$itemDoc.sku", "—"] },
+                            unit: { $ifNull: ["$itemDoc.unit", "pcs"] },
+                            quantitySold: 1,
+                            revenueGenerated: 1,
+                        }},
+                    ],
+                }},
+            ]),
+
+            // Category breakdown
+            Sale.aggregate([
+                { $match: saleMatch },
+                { $unwind: "$items" },
+                { $lookup: {
+                    from: "items",
+                    localField: "items.itemId",
+                    foreignField: "_id",
+                    as: "itemDoc",
+                }},
+                { $unwind: { path: "$itemDoc", preserveNullAndEmptyArrays: true } },
+                { $lookup: {
+                    from: "categories",
+                    localField: "itemDoc.categoryId",
+                    foreignField: "_id",
+                    as: "catDoc",
+                }},
+                { $unwind: { path: "$catDoc", preserveNullAndEmptyArrays: true } },
+                { $group: {
+                    _id: { $ifNull: ["$catDoc.name", "Uncategorized"] },
+                    revenue: { $sum: "$items.lineTotal" },
+                    units:   { $sum: "$items.quantity" },
+                }},
+                { $sort: { revenue: -1 } },
+            ]),
+
+            // Expenses breakdown by category
+            Expense.aggregate([
+                { $match: expenseMatch },
+                { $group: {
+                    _id: "$category",
+                    total: { $sum: "$amount" },
+                    count: { $sum: 1 },
+                }},
+                { $sort: { total: -1 } },
+            ]),
+
+            // Salaries total
+            SalaryPayment.aggregate([
+                { $match: salaryMatch },
+                { $group: {
+                    _id: null,
+                    total: { $sum: "$amount" },
+                    count: { $sum: 1 },
+                }},
+            ]),
+
+            // Stock valuation & count
+            Stock.aggregate([
+                { $match: stockMatch },
+                { $lookup: {
+                    from: "items",
+                    localField: "itemId",
+                    foreignField: "_id",
+                    as: "itemDoc",
+                }},
+                { $unwind: { path: "$itemDoc", preserveNullAndEmptyArrays: true } },
+                { $group: {
+                    _id: null,
+                    stockValueAtCost:   { $sum: { $multiply: ["$quantity", { $ifNull: ["$itemDoc.costPrice", 0] }] } },
+                    stockValueAtRetail: { $sum: { $multiply: ["$quantity", { $ifNull: ["$itemDoc.sellingPrice", 0] }] } },
+                    totalQuantity:      { $sum: "$quantity" },
+                    skuCount:           { $sum: 1 },
+                    lowStockCount: {
+                        $sum: {
+                            $cond: [
+                                { $lte: ["$quantity", { $ifNull: ["$itemDoc.reorderLevel", 5] }] },
+                                1,
+                                0
+                            ]
+                        }
+                    },
+                }},
+            ]),
+
+            // Total outstanding customer debt
+            Customer.aggregate([
+                { $match: { ...customerMatch, currentBalance: { $gt: 0 } } },
+                { $group: {
+                    _id: null,
+                    totalDebt:   { $sum: "$currentBalance" },
+                    debtorCount: { $sum: 1 },
+                }},
+            ]),
+
+            // Ledger movements during period
+            LedgerEntry.aggregate([
+                { $match: ledgerMatch },
+                { $group: {
+                    _id: "$type",
+                    totalAmount: { $sum: "$amount" },
+                    entryCount:  { $sum: 1 },
+                }},
+            ]),
+
+            // Sales timeline for charting
+            Sale.aggregate([
+                { $match: saleMatch },
+                { $group: {
+                    _id: { $dateToString: { format: groupFormat, date: "$createdAt", timezone: "UTC" } },
+                    revenue: { $sum: "$totalAmount" },
+                    count:   { $sum: 1 },
+                }},
+                { $sort: { _id: 1 } },
+            ]),
+
+            // Expense timeline for charting
+            Expense.aggregate([
+                { $match: expenseMatch },
+                { $group: {
+                    _id: { $dateToString: { format: groupFormat, date: "$date", timezone: "UTC" } },
+                    expenses: { $sum: "$amount" },
+                }},
+                { $sort: { _id: 1 } },
+            ]),
+
+            // All branches (for multi-branch comparison in overall mode)
+            Branch.find({ organizationId: orgId, isActive: true }).select("name code address").lean(),
+
+            // Branch sales (if overall mode)
+            !targetBranchId
+                ? Sale.aggregate([
+                    { $match: { organizationId: orgId, createdAt: { $gte: start, $lte: end } } },
+                    { $facet: {
+                        summary: [
+                            { $group: {
+                                _id: "$branchId",
+                                revenue:   { $sum: "$totalAmount" },
+                                saleCount: { $sum: 1 },
+                            }},
+                        ],
+                        cogs: [
+                            { $unwind: "$items" },
+                            { $group: {
+                                _id: "$branchId",
+                                totalCOGS: { $sum: { $multiply: ["$items.quantity", "$items.costPriceAtSale"] } },
+                            }},
+                        ],
+                    }},
+                ])
+                : Promise.resolve([]),
+
+            // Branch expenses (if overall mode)
+            !targetBranchId
+                ? Expense.aggregate([
+                    { $match: { organizationId: orgId, date: { $gte: start, $lte: end } } },
+                    { $group: { _id: "$branchId", expenses: { $sum: "$amount" } } },
+                ])
+                : Promise.resolve([]),
+
+            // Branch salaries (if overall mode)
+            !targetBranchId
+                ? SalaryPayment.aggregate([
+                    { $match: { organizationId: orgId, paidOn: { $gte: start, $lte: end } } },
+                    { $group: { _id: "$branchId", salaries: { $sum: "$amount" } } },
+                ])
+                : Promise.resolve([]),
+        ]);
+
+        // 4. Synthesize financial metrics
+        const saleSummary = salesAgg[0]?.summary[0] ?? {};
+        const saleCOGS    = salesAgg[0]?.cogs[0] ?? {};
+        const topItems    = (salesAgg[0]?.topItems ?? []).map((t) => ({
+            ...t,
+            revenueGenerated: r2(t.revenueGenerated),
+        }));
+
+        const totalRevenue       = r2(saleSummary.totalRevenue ?? 0);
+        const totalCashSales     = r2(saleSummary.totalCashSales ?? 0);
+        const totalCreditSales   = r2(saleSummary.totalCreditSales ?? 0);
+        const totalDiscount      = r2(saleSummary.totalDiscount ?? 0);
+        const saleCount          = saleSummary.saleCount ?? 0;
+        const totalUnitsSold     = saleCOGS.totalUnitsSold ?? 0;
+        const totalCOGS          = r2(saleCOGS.totalCOGS ?? 0);
+        const averageTicketSize  = saleCount > 0 ? r2(totalRevenue / saleCount) : 0;
+
+        const grossProfit        = r2(totalRevenue - totalCOGS);
+        const grossMarginPct     = totalRevenue > 0 ? r2((grossProfit / totalRevenue) * 100) : 0;
+
+        const totalExpenses      = r2(expensesAgg.reduce((sum, e) => sum + (e.total || 0), 0));
+        const totalSalaries      = r2(salariesAgg[0]?.total ?? 0);
+        const totalOperatingCost = r2(totalExpenses + totalSalaries);
+
+        const netProfit          = r2(grossProfit - totalOperatingCost);
+        const netMarginPct       = totalRevenue > 0 ? r2((netProfit / totalRevenue) * 100) : 0;
+
+        // Inventory snapshot
+        const stockData = stockValuationAgg[0] ?? {};
+        const inventory = {
+            stockValueAtCost:   r2(stockData.stockValueAtCost ?? 0),
+            stockValueAtRetail: r2(stockData.stockValueAtRetail ?? 0),
+            potentialProfit:    r2((stockData.stockValueAtRetail ?? 0) - (stockData.stockValueAtCost ?? 0)),
+            totalUnits:         stockData.totalQuantity ?? 0,
+            skuCount:           stockData.skuCount ?? 0,
+            lowStockCount:      stockData.lowStockCount ?? 0,
+        };
+
+        // Receivables snapshot
+        const ledgerMap = Object.fromEntries(ledgerAgg.map((l) => [l._id, l]));
+        const receivables = {
+            totalOutstandingDebt:  r2(receivablesAgg[0]?.totalDebt ?? 0),
+            debtorCount:           receivablesAgg[0]?.debtorCount ?? 0,
+            creditIssuedInPeriod:  r2(ledgerMap["sale"]?.totalAmount ?? 0),
+            debtCollectedInPeriod: r2(ledgerMap["payment"]?.totalAmount ?? 0),
+        };
+
+        // Category breakdown
+        const categoryBreakdown = categorySalesAgg.map((c) => ({
+            name: c._id,
+            revenue: r2(c.revenue),
+            units: c.units,
+            percentage: totalRevenue > 0 ? r2((c.revenue / totalRevenue) * 100) : 0,
+        }));
+
+        // Expense category breakdown
+        const expenseBreakdown = expensesAgg.map((e) => ({
+            category: e._id || "General",
+            amount: r2(e.total),
+            count: e.count,
+            percentage: totalExpenses > 0 ? r2((e.total / totalExpenses) * 100) : 0,
+        }));
+
+        // Timeline merged trend
+        const dateKeySet = new Set([
+            ...salesTimelineAgg.map((s) => s._id),
+            ...expenseTimelineAgg.map((e) => e._id),
+        ]);
+        const sortedDateKeys = Array.from(dateKeySet).sort();
+        const salesMap = Object.fromEntries(salesTimelineAgg.map((s) => [s._id, s.revenue]));
+        const expMap   = Object.fromEntries(expenseTimelineAgg.map((e) => [e._id, e.expenses]));
+
+        const timelineTrend = sortedDateKeys.map((key) => {
+            const rev = r2(salesMap[key] ?? 0);
+            const exp = r2(expMap[key] ?? 0);
+            return {
+                date: key,
+                revenue: rev,
+                expenses: exp,
+                netProfit: r2(rev - exp),
+            };
+        });
+
+        // Branch breakdown (if Overall mode)
+        let branchBreakdown = null;
+        if (!targetBranchId && branchList.length > 0) {
+            const bSumMap  = Object.fromEntries((branchSalesAgg[0]?.summary ?? []).map((s) => [s._id.toString(), s]));
+            const bCogsMap = Object.fromEntries((branchSalesAgg[0]?.cogs ?? []).map((c) => [c._id.toString(), c]));
+            const bExpMap  = Object.fromEntries(branchExpensesAgg.map((e) => [e._id.toString(), e.expenses]));
+            const bSalMap  = Object.fromEntries(branchSalariesAgg.map((s) => [s._id.toString(), s.salaries]));
+
+            branchBreakdown = branchList.map((branch) => {
+                const bId   = branch._id.toString();
+                const s     = bSumMap[bId] ?? {};
+                const c     = bCogsMap[bId] ?? {};
+                const bRev  = r2(s.revenue ?? 0);
+                const bCogs = r2(c.totalCOGS ?? 0);
+                const bGross = r2(bRev - bCogs);
+                const bExp  = r2(bExpMap[bId] ?? 0);
+                const bSal  = r2(bSalMap[bId] ?? 0);
+                const bNet  = r2(bGross - bExp - bSal);
+                return {
+                    branchId:        bId,
+                    name:            branch.name,
+                    code:            branch.code || "—",
+                    revenue:         bRev,
+                    cogs:            bCogs,
+                    grossProfit:     bGross,
+                    expenses:        bExp,
+                    salaries:        bSal,
+                    netProfit:       bNet,
+                    saleCount:       s.saleCount ?? 0,
+                    contributionPct: totalRevenue > 0 ? r2((bRev / totalRevenue) * 100) : 0,
+                };
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "Comprehensive executive report generated successfully",
+            data: {
+                meta: {
+                    interval,
+                    periodLabel,
+                    startDate: start,
+                    endDate: end,
+                    generatedAt: new Date(),
+                    scope: targetBranchId ? "single_branch" : "overall_business",
+                    branch: branchInfo ? { id: branchInfo._id, name: branchInfo.name, code: branchInfo.code } : null,
+                },
+                financials: {
+                    totalRevenue,
+                    totalCOGS,
+                    grossProfit,
+                    grossMarginPct,
+                    totalExpenses,
+                    totalSalaries,
+                    totalOperatingCost,
+                    netProfit,
+                    netMarginPct,
+                },
+                sales: {
+                    saleCount,
+                    totalUnitsSold,
+                    averageTicketSize,
+                    totalCashSales,
+                    totalCreditSales,
+                    totalDiscount,
+                    cashSalesPct: totalRevenue > 0 ? r2((totalCashSales / totalRevenue) * 100) : 0,
+                    creditSalesPct: totalRevenue > 0 ? r2((totalCreditSales / totalRevenue) * 100) : 0,
+                },
+                inventory,
+                receivables,
+                topItems,
+                categoryBreakdown,
+                expenseBreakdown,
+                timelineTrend,
+                branchBreakdown,
+            },
+        });
+    } catch (err) {
+        console.error("getComprehensiveReport error:", err);
+        return fail(res, 500, "An unexpected error occurred while generating report");
     }
 };

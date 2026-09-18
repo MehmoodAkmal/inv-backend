@@ -1,5 +1,11 @@
 import express from "express";
-import { getProfitLoss, getBranchComparison, getLowStockAlert, getDashboardSummary } from "../controller/reportController.js";
+import {
+    getProfitLoss,
+    getBranchComparison,
+    getLowStockAlert,
+    getDashboardSummary,
+    getComprehensiveReport,
+} from "../controller/reportController.js";
 import { authentication } from "../middleware/authentication.js";
 import { authorization } from "../middleware/authorization.js";
 import { branchScope } from "../middleware/branchScope.js";
@@ -67,6 +73,14 @@ reportRouter.get(
     checkPermission("reports", "dashboard"),
     branchScope,
     getDashboardSummary
+);
+
+// GET /api/v1/reports/comprehensive — admin only
+reportRouter.get(
+    "/reports/comprehensive",
+    authentication,
+    authorization("admin"),
+    getComprehensiveReport
 );
 
 export default reportRouter;
