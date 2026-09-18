@@ -50,6 +50,11 @@ export const createSale = async (req, res) => {
         if (role === "manager" || role === "cashier") {
             if (!req.allowedBranchId) return fail(res, 400, "No branch assigned to your account");
             branchId = req.allowedBranchId.toString();
+        } else if (!branchId && req.allowedBranchId) {
+            branchId = req.allowedBranchId.toString();
+        }
+        if (!branchId) {
+            return fail(res, 400, "Branch is required to process sale");
         }
 
         const { paymentType, customerId, amountPaid, discount, note } = value;
