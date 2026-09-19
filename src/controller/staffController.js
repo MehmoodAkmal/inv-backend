@@ -1,5 +1,6 @@
 import User from "../Schemas/auth.js";
 import Branch from "../Schemas/branch.js";
+import Employee from "../Schemas/employee.js";
 import { createStaffSchema, updateStaffSchema } from "../validation/auth.js";
 
 // Safe fields to return — never expose password
@@ -7,6 +8,12 @@ const SAFE_FIELDS = "firstName lastName email role isActive branchId organizatio
 
 // Staff roles that an admin is allowed to manage
 const STAFF_ROLES = ["manager", "cashier"];
+
+// Human-readable designation for each role
+const ROLE_DESIGNATION = {
+    manager: "Branch Manager",
+    cashier: "Cashier (Point of Sale)",
+};
 
 // POST /staff — admin only
 export const createStaff = async (req, res) => {
@@ -54,6 +61,24 @@ export const createStaff = async (req, res) => {
             branchId,
             organizationId,
         });
+
+        // ── Auto-create a linked Employee record ──────────────────────────
+        // Salary defaults to 0; admin should edit it in the Employees page.
+        // This runs after User.create so a failure here doesn't block the user.
+        try {
+            await Employee.create({
+                organizationId,
+                branchId,
+                userId:        newUser._id,
+                name:          `${firstName} ${lastName}`.trim(),
+                designation:   ROLE_DESIGNATION[role] || role,
+                monthlySalary: 0,
+                phone:         null,
+            });
+        } catch (empErr) {
+            // Log but do not fail — admin can add employee manually if needed
+            console.error("createStaff: auto-create employee failed:", empErr.message);
+        }
 
         return res.status(201).json({
             success: true,
