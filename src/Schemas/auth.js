@@ -22,6 +22,11 @@ const userSchema = new mongoose.Schema({
         enum: ["superAdmin", "admin", "manager", "cashier"],
         default: "admin",
     },
+    phone: {
+        type: String,
+        trim: true,
+        default: null,
+    },
     isActive: {
         type: Boolean,
         default: true, // soft-delete flag for staff accounts
