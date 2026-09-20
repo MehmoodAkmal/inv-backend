@@ -12,8 +12,32 @@ import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 const app = express();
 dotenv.config();
+
+// CORS configuration driven by CORS_ORIGIN environment variable
+const allowedOrigins = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN
+      .split(",")
+      .map((origin) => origin.trim().replace(/\/+$/, ""))
+      .filter(Boolean)
+  : ["http://localhost:5173", "http://localhost:3000"];
+
+const corsOptions = {
+  origin: (origin, callback) => {
+    // Allow requests with no origin (e.g. mobile apps, curl, Postman)
+    if (!origin) return callback(null, true);
+    const normalized = origin.replace(/\/+$/, "");
+    if (allowedOrigins.includes("*") || allowedOrigins.includes(normalized)) {
+      return callback(null, true);
+    }
+    return callback(new Error(`Not allowed by CORS: ${origin}`));
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "x-branch-id"],
+};
+
 app.use(helmet());
-app.use(cors());
+app.use(cors(corsOptions));
 app.use(express.json());
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -36,6 +60,9 @@ app.get('/', authentication, authorization("superAdmin"), (req, res) => {
     return res.status(200).json({ success: true, message: "Backend is running" })
 })
 app.use((err, req, res, next) => {
+    if (err.message && err.message.startsWith("Not allowed by CORS")) {
+        return res.status(403).json({ success: false, message: err.message });
+    }
     console.error(err.stack);
     return res.status(500).json({ success: false, message: "Something went wrong" });
 });
