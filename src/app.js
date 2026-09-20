@@ -54,16 +54,41 @@ const limiter = rateLimit({
   },
 });
 app.use(limiter);
-dbConnection()
-prepareRoutes(app);
-app.get('/', authentication, authorization("superAdmin"), (req, res) => {
-    return res.status(200).json({ success: true, message: "Backend is running" })
-})
-app.use((err, req, res, next) => {
-    if (err.message && err.message.startsWith("Not allowed by CORS")) {
-        return res.status(403).json({ success: false, message: err.message });
-    }
-    console.error(err.stack);
-    return res.status(500).json({ success: false, message: "Something went wrong" });
+
+// Database connection middleware for resilient serverless cold-starts
+app.use(async (req, res, next) => {
+  try {
+    await dbConnection();
+    next();
+  } catch (err) {
+    console.error("MongoDB connection middleware failed:", err.message);
+    return res.status(500).json({ success: false, message: "Database connection failed" });
+  }
 });
-app.listen(process.env.PORT || 8000, () => console.log("app is listening on port 8000"))
+
+prepareRoutes(app);
+
+// Public health check routes
+app.get(["/", "/health", "/api/health"], (req, res) => {
+  return res.status(200).json({
+    success: true,
+    message: "Inventory Management API is healthy and operational",
+    timestamp: new Date().toISOString(),
+  });
+});
+
+app.use((err, req, res, next) => {
+  if (err.message && err.message.startsWith("Not allowed by CORS")) {
+    return res.status(403).json({ success: false, message: err.message });
+  }
+  console.error(err.stack);
+  return res.status(500).json({ success: false, message: "Something went wrong" });
+});
+
+// Run HTTP listener only outside Vercel serverless functions
+if (process.env.NODE_ENV !== "test" && !process.env.VERCEL) {
+  const PORT = process.env.PORT || 8000;
+  app.listen(PORT, () => console.log(`app is listening on port ${PORT}`));
+}
+
+export default app;
